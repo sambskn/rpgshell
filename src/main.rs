@@ -11,6 +11,7 @@ mod dev_tools;
 mod menus;
 mod screens;
 mod theme;
+mod text_boxes;
 
 use bevy::{asset::AssetMetaCheck, prelude::*};
 
@@ -53,6 +54,7 @@ impl Plugin for AppPlugin {
             menus::plugin,
             screens::plugin,
             theme::plugin,
+            text_boxes::plugin
         ));
 
         // Order new `AppSystems` variants by adding them here:
