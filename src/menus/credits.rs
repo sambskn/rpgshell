@@ -30,18 +30,14 @@ fn spawn_credits_menu(mut commands: Commands) {
 }
 
 fn created_by() -> impl Bundle {
-    grid(vec![
-        ["Deez Nuts", "Everything"],
-    ])
+    grid(vec![["Deez Nuts", "Everything"]])
 }
 
 fn assets() -> impl Bundle {
-    grid(vec![
-        [
-            "Bevy logo",
-            "All rights reserved by the Bevy Foundation, permission granted for splash screen use when unmodified",
-        ],
-    ])
+    grid(vec![[
+        "Bevy logo",
+        "All rights reserved by the Bevy Foundation, permission granted for splash screen use when unmodified",
+    ]])
 }
 
 fn grid(content: Vec<[&'static str; 2]>) -> impl Bundle {
