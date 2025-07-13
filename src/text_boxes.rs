@@ -7,6 +7,27 @@ use bevy::{
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 pub struct TextBox;
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct TextBoxText {
+    pub is_visible: bool,
+    pub visible_color: Color,
+    pub appearance_time_s: f32,
+    pub spawn_time_s: f32,
+}
+
+impl TextBoxText {
+    pub fn new(appearance_time_s: f32, spawn_time_s: f32, visible_color: Color) -> Self {
+        Self {
+            is_visible: false,
+            visible_color,
+            appearance_time_s,
+            spawn_time_s,
+        }
+    }
+}
+
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 pub struct TextBoxMesh {
@@ -37,8 +58,10 @@ impl TextBoxMesh {
 pub(super) fn plugin(app: &mut App) {
     app.register_type::<TextBox>();
     app.register_type::<TextBoxMesh>();
+    app.register_type::<TextBoxMesh>();
 
     app.add_systems(Update, animate_text_box_mesh_intro);
+    app.add_systems(Update, animate_text_box_text_intro);
 }
 
 fn animate_text_box_mesh_intro(
@@ -61,6 +84,27 @@ fn animate_text_box_mesh_intro(
         let new_mesh = get_text_box_mesh(mesh_info.with_cutout, alpha);
         let new_mesh_handle = meshes.add(new_mesh);
         mesh2d.0 = new_mesh_handle;
+    }
+}
+
+fn animate_text_box_text_intro(
+    mut text_query: Query<(&mut TextColor, &mut TextBoxText)>,
+    time: Res<Time>,
+) {
+    for (mut text_color, mut text_info) in text_query.iter_mut() {
+        if text_info.is_visible {
+            // skip if we're already visible
+            continue;
+        }
+        let alpha = if time.elapsed_secs() - text_info.spawn_time_s > text_info.appearance_time_s {
+            text_info.is_visible = true;
+            1.0
+        } else {
+            (time.elapsed_secs() - text_info.spawn_time_s) / text_info.appearance_time_s
+        };
+        let mut color = text_info.visible_color;
+        color.set_alpha(alpha);
+        text_color.0 = color;
     }
 }
 
@@ -135,6 +179,7 @@ pub fn text_box(
                 ))
                 .with_scale(Vec3::splat(1.)),
                 TextColor(BLACK.into()),
+                TextBoxText::new(TEXTBOX_FADE_IN_TIME, spawn_time, BLACK.into())
             ),
             (
                 Text2d::new(text),
@@ -145,6 +190,7 @@ pub fn text_box(
                 Transform::from_translation(Vec3::new(0., TEXTBOX_OFFSET_FROM_CENTER_Y, TEXT_Z))
                     .with_scale(Vec3::splat(1.)),
                 TextColor(GHOST_WHITE.into()),
+                TextBoxText::new(TEXTBOX_FADE_IN_TIME, spawn_time, GHOST_WHITE.into())
             ),
         ],
     )
