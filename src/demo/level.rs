@@ -11,12 +11,13 @@ pub fn spawn_level(
     mut commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
 ) {
     commands.spawn((
         Name::new("Level"),
         Transform::default(),
         Visibility::default(),
         StateScoped(Screen::Gameplay),
-        text_box("yo".to_string(), meshes, materials),
+        text_box("yo".to_string(), time.elapsed_secs(), meshes, materials),
     ));
 }

@@ -7,9 +7,61 @@ use bevy::{
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 pub struct TextBox;
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct TextBoxMesh {
+    pub is_visible: bool,
+    pub visible_alpha: f32,
+    pub appearance_time_s: f32,
+    pub spawn_time_s: f32,
+    pub with_cutout: bool,
+}
+
+impl TextBoxMesh {
+    pub fn new(
+        appearance_time_s: f32,
+        spawn_time_s: f32,
+        visible_alpha: f32,
+        with_cutout: bool,
+    ) -> Self {
+        Self {
+            is_visible: false,
+            visible_alpha,
+            appearance_time_s,
+            spawn_time_s,
+            with_cutout,
+        }
+    }
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.register_type::<TextBox>();
+    app.register_type::<TextBoxMesh>();
+
+    app.add_systems(Update, animate_text_box_mesh_intro);
+}
+
+fn animate_text_box_mesh_intro(
+    mut mesh2d_query: Query<(&mut Mesh2d, &mut TextBoxMesh)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    time: Res<Time>,
+) {
+    for (mut mesh2d, mut mesh_info) in mesh2d_query.iter_mut() {
+        if mesh_info.is_visible {
+            // skip if we're already visible
+            continue;
+        }
+        let alpha = if time.elapsed_secs() - mesh_info.spawn_time_s > mesh_info.appearance_time_s {
+            mesh_info.is_visible = true;
+            mesh_info.visible_alpha
+        } else {
+            ((time.elapsed_secs() - mesh_info.spawn_time_s) / mesh_info.appearance_time_s)
+                * mesh_info.visible_alpha
+        };
+        let new_mesh = get_text_box_mesh(mesh_info.with_cutout, alpha);
+        let new_mesh_handle = meshes.add(new_mesh);
+        mesh2d.0 = new_mesh_handle;
+    }
 }
 
 pub const TEXTBOX_OFFSET_FROM_CENTER_Y: f32 = -150.;
@@ -30,59 +82,16 @@ pub const TEXT_FONT_SIZE: f32 = 25.0;
 
 pub const LINE_THICKNESS: f32 = 10.;
 
+pub const TEXTBOX_FADE_IN_TIME: f32 = 0.125;
+
 pub fn text_box(
     text: String,
+    spawn_time: f32,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) -> impl Bundle {
-    let half_height = TEXTBOX_HEIGHT * 0.5;
-    let half_width = TEXTBOX_WIDTH * 0.5;
-    let inner_height = half_height - LINE_THICKNESS;
-    let inner_width = half_width - LINE_THICKNESS;
-    // default quad mesh
-    let mut main_bg_mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        vec![
-            [-half_width, half_height, 0.],
-            [half_width, half_height, 0.],
-            [half_width, -half_height, 0.],
-            [-half_width, -half_height, 0.],
-            [-inner_width, inner_height, 0.],
-            [inner_width, inner_height, 0.],
-            [inner_width, -inner_height, 0.],
-            [-inner_width, -inner_height, 0.],
-        ],
-    )
-    .with_inserted_indices(Indices::U32(vec![
-        0, 1, 4, 4, 1, 5, 5, 1, 2, 6, 5, 2, 3, 7, 6, 2, 3, 6, 3, 4, 7, 4, 3, 0,
-    ]));
-    // Build vertex colors for the quad. One entry per vertex (the corners of the quad)
-    let vertex_colors: Vec<[f32; 4]> = vec![
-        LinearRgba::new(0.95, 0.05, 0.2, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.97, 0.0, 0.17, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.98, 0.0, 0.1, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.92, 0.1, 0.1, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.95, 0.05, 0.2, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.97, 0.0, 0.17, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.98, 0.0, 0.1, TEXTBOX_BG_ALPHA).to_f32_array(),
-        LinearRgba::new(0.92, 0.1, 0.1, TEXTBOX_BG_ALPHA).to_f32_array(),
-    ];
-
-    // Insert the vertex colors as an attribute
-    main_bg_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vertex_colors);
-
-    let mut bg_shadow_mesh = Mesh::from(Rectangle::default());
-    let bg_shadow_vertex_colors: Vec<[f32; 4]> = vec![
-        LinearRgba::new(0.55, 0.0, 0.1, TEXTBOX_BG_SHADOW_ALPHA).to_f32_array(),
-        LinearRgba::new(0.57, 0.0, 0.08, TEXTBOX_BG_SHADOW_ALPHA).to_f32_array(),
-        LinearRgba::new(0.58, 0.0, 0.05, TEXTBOX_BG_SHADOW_ALPHA).to_f32_array(),
-        LinearRgba::new(0.52, 0.05, 0.05, TEXTBOX_BG_SHADOW_ALPHA).to_f32_array(),
-    ];
-    bg_shadow_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, bg_shadow_vertex_colors);
+    let main_bg_mesh = get_text_box_mesh(true, 0.0);
+    let bg_shadow_mesh = get_text_box_mesh(false, 0.0);
 
     let main_bg_mesh_handle = meshes.add(main_bg_mesh);
     let bg_shadow_mesh_handle = meshes.add(bg_shadow_mesh);
@@ -98,13 +107,20 @@ pub fn text_box(
                     TEXTBOX_OFFSET_FROM_CENTER_Y - TEXTBOX_BG_SHADOW_OFFSET,
                     BOX_BG_SHADOW_Z
                 ))
-                .with_scale(Vec3::new(TEXTBOX_WIDTH, TEXTBOX_HEIGHT, 1.)),
+                .with_scale(Vec3::splat(1.)),
+                TextBoxMesh::new(
+                    TEXTBOX_FADE_IN_TIME,
+                    spawn_time,
+                    TEXTBOX_BG_SHADOW_ALPHA,
+                    false
+                ),
             ),
             (
                 Mesh2d(main_bg_mesh_handle),
                 MeshMaterial2d(materials.add(ColorMaterial::default())),
                 Transform::from_translation(Vec3::new(0., TEXTBOX_OFFSET_FROM_CENTER_Y, BOX_BG_Z))
                     .with_scale(Vec3::splat(1.)),
+                TextBoxMesh::new(TEXTBOX_FADE_IN_TIME, spawn_time, TEXTBOX_BG_ALPHA, true),
             ),
             (
                 Text2d::new(text.clone()),
@@ -132,4 +148,53 @@ pub fn text_box(
             ),
         ],
     )
+}
+
+fn get_text_box_mesh(with_inner_vertices: bool, alpha: f32) -> Mesh {
+    let half_height = TEXTBOX_HEIGHT * 0.5;
+    let half_width = TEXTBOX_WIDTH * 0.5;
+    let inner_height = half_height - LINE_THICKNESS;
+    let inner_width = half_width - LINE_THICKNESS;
+    let mut vertices = vec![
+        [-half_width, half_height, 0.],
+        [half_width, half_height, 0.],
+        [half_width, -half_height, 0.],
+        [-half_width, -half_height, 0.],
+    ];
+    if with_inner_vertices {
+        vertices.extend([
+            [-inner_width, inner_height, 0.],
+            [inner_width, inner_height, 0.],
+            [inner_width, -inner_height, 0.],
+            [-inner_width, -inner_height, 0.],
+        ]);
+    }
+    let mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+    .with_inserted_indices(Indices::U32(if with_inner_vertices {
+        vec![
+            0, 1, 4, 4, 1, 5, 5, 1, 2, 6, 5, 2, 3, 7, 6, 2, 3, 6, 3, 4, 7, 4, 3, 0,
+        ]
+    } else {
+        vec![0, 1, 2, 3, 0, 2]
+    }));
+    // Build vertex colors for the quad. One entry per vertex (the corners of the quad)
+    let mut vertex_colors: Vec<[f32; 4]> = vec![
+        LinearRgba::new(0.95, 0.05, 0.2, alpha).to_f32_array(),
+        LinearRgba::new(0.97, 0.0, 0.17, alpha).to_f32_array(),
+        LinearRgba::new(0.98, 0.0, 0.1, alpha).to_f32_array(),
+        LinearRgba::new(0.92, 0.1, 0.1, alpha).to_f32_array(),
+    ];
+    if with_inner_vertices {
+        vertex_colors.extend([
+            LinearRgba::new(0.95, 0.05, 0.2, alpha).to_f32_array(),
+            LinearRgba::new(0.97, 0.0, 0.17, alpha).to_f32_array(),
+            LinearRgba::new(0.98, 0.0, 0.1, alpha).to_f32_array(),
+            LinearRgba::new(0.92, 0.1, 0.1, alpha).to_f32_array(),
+        ]);
+    }
+    mesh.with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vertex_colors)
 }
