@@ -4,9 +4,35 @@ use bevy::{
     render::{mesh::Indices, render_asset::RenderAssetUsages, render_resource::PrimitiveTopology},
 };
 
+use crate::screens::Screen;
+
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
-pub struct TextBox;
+pub struct TextBox {
+    pub text_strings: Vec<String>,
+    pub current_text_index: usize,
+    pub last_text_index_displayed: Option<usize>,
+    pub time_since_last_text_displayed: f32,
+    pub should_spawn_next_line: bool,
+    pub indicator_visible: bool,
+}
+
+impl TextBox {
+    pub fn new(text_strings: Vec<String>) -> Self {
+        Self {
+            text_strings,
+            current_text_index: 0,
+            last_text_index_displayed: None,
+            time_since_last_text_displayed: 0.0,
+            should_spawn_next_line: false,
+            indicator_visible: false,
+        }
+    }
+}
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct TextLine;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
@@ -68,6 +94,49 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Update, animate_text_box_mesh_intro);
     app.add_systems(Update, animate_text_box_text_intro);
     app.add_systems(Update, animate_text_box_indicator);
+    app.add_systems(Update, spawn_text_lines);
+}
+
+const TEXT_TRANSITION_TIME: f32 = 0.75;
+fn spawn_text_lines(
+    mut commands: Commands,
+    mut textbox_query: Query<&mut TextBox>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
+) {
+    let mut textbox_check = textbox_query.single_mut();
+    if textbox_check.is_err() {
+        return;
+    }
+    let textbox = textbox_check.as_mut().unwrap();
+
+    if textbox.last_text_index_displayed.is_none()
+        && textbox.time_since_last_text_displayed >= TEXT_TRANSITION_TIME
+    {
+        // spawn initial text line
+        commands.spawn(text_line(
+            textbox.text_strings[0].clone(),
+            time.elapsed_secs(),
+        ));
+        textbox.last_text_index_displayed = Some(0);
+        textbox.current_text_index = 0;
+        textbox.time_since_last_text_displayed = 0.;
+    } else if textbox.last_text_index_displayed.is_some()
+        && textbox.time_since_last_text_displayed >= TEXT_TRANSITION_TIME
+        && !textbox.indicator_visible
+    {
+        println!("spawn that weidwejkd3we");
+        // spawn indicator
+        commands.spawn(text_box_next_indicator(
+            meshes,
+            materials,
+            time.elapsed_secs(),
+        ));
+        textbox.indicator_visible = true;
+    } else if textbox.time_since_last_text_displayed < TEXT_TRANSITION_TIME {
+        textbox.time_since_last_text_displayed += time.delta_secs();
+    }
 }
 
 fn animate_text_box_mesh_intro(
@@ -106,9 +175,13 @@ fn animate_text_box_indicator(
             get_colored_triangle_mesh(TRIANGLE_INDICATOR_HEIGHT, TRIANGLE_INDICATOR_WIDTH, t);
         let new_mesh_handle = meshes.add(new_mesh);
         mesh2d.0 = new_mesh_handle;
-        transform.translation.y =
-            TEXTBOX_OFFSET_FROM_CENTER_Y - (TEXTBOX_HEIGHT / 2.0) + t * TRIANGLE_WOBBLE_OFFSET;
+        transform.translation.y = get_indicator_y(time.elapsed_secs());
     }
+}
+
+fn get_indicator_y(elapsed_secs: f32) -> f32 {
+    TEXTBOX_OFFSET_FROM_CENTER_Y - (TEXTBOX_HEIGHT / 2.0)
+        + (elapsed_secs * TRIANGLE_WOBBLE_SPEED).sin() * TRIANGLE_WOBBLE_OFFSET
 }
 
 fn animate_text_box_text_intro(
@@ -157,23 +230,18 @@ pub const LINE_THICKNESS: f32 = 10.;
 pub const TEXTBOX_FADE_IN_TIME: f32 = 0.125;
 
 pub fn text_box(
-    text: String,
+    text_strings: Vec<String>,
     spawn_time: f32,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
 ) -> impl Bundle {
     let main_bg_mesh = get_text_box_mesh(true, 0.0);
     let bg_shadow_mesh = get_text_box_mesh(false, 0.0);
-    let triangle_mesh = get_colored_triangle_mesh(
-        TRIANGLE_INDICATOR_HEIGHT,
-        TRIANGLE_INDICATOR_WIDTH,
-        spawn_time.sin(),
-    );
+
     let main_bg_mesh_handle = meshes.add(main_bg_mesh);
     let bg_shadow_mesh_handle = meshes.add(bg_shadow_mesh);
-    let triangle_mesh_handle = meshes.add(triangle_mesh);
     (
-        TextBox,
+        TextBox::new(text_strings),
         children![
             (
                 Mesh2d(bg_shadow_mesh_handle),
@@ -198,6 +266,16 @@ pub fn text_box(
                     .with_scale(Vec3::splat(1.)),
                 TextBoxMesh::new(TEXTBOX_FADE_IN_TIME, spawn_time, TEXTBOX_BG_ALPHA, true),
             ),
+        ],
+    )
+}
+
+fn text_line(text: String, spawn_time: f32) -> impl Bundle {
+    (
+        StateScoped(Screen::Gameplay),
+        TextLine,
+        Transform::default(),
+        children![
             (
                 Text2d::new(text.clone()),
                 TextFont {
@@ -224,18 +302,35 @@ pub fn text_box(
                 TextColor(GHOST_WHITE.into()),
                 TextBoxText::new(TEXTBOX_FADE_IN_TIME, spawn_time, GHOST_WHITE.into())
             ),
-            (
-                Mesh2d(triangle_mesh_handle),
-                MeshMaterial2d(materials.add(ColorMaterial::default())),
-                Transform::from_translation(Vec3::new(
-                    0.,
-                    TEXTBOX_OFFSET_FROM_CENTER_Y - (TEXTBOX_HEIGHT / 2.0),
-                    TRIANGLE_MESH_Z
-                ))
-                .with_scale(Vec3::splat(1.)),
-                TextBoxIndicator,
-            ),
         ],
+    )
+}
+
+fn text_box_next_indicator(
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    spawn_time: f32,
+) -> impl Bundle {
+    let triangle_mesh = get_colored_triangle_mesh(
+        TRIANGLE_INDICATOR_HEIGHT,
+        TRIANGLE_INDICATOR_WIDTH,
+        spawn_time.sin(),
+    );
+    let triangle_mesh_handle = meshes.add(triangle_mesh);
+    (
+        Transform::default(),
+        children![(
+            Mesh2d(triangle_mesh_handle),
+            MeshMaterial2d(materials.add(ColorMaterial::default())),
+            Transform::from_translation(Vec3::new(
+                0.,
+                get_indicator_y(spawn_time),
+                TRIANGLE_MESH_Z,
+            ))
+            .with_scale(Vec3::splat(1.)),
+            TextBoxIndicator
+        )],
+        StateScoped(Screen::Gameplay),
     )
 }
 
@@ -307,17 +402,17 @@ fn get_colored_triangle_mesh(height: f32, width: f32, t: f32) -> Mesh {
     let color1 = if t >= 0. {
         LinearRgba::new(0.05, 0.2, 0.95, 1.0).mix(&LinearRgba::new(0.05, 0.95, 0.2, 1.0), t)
     } else {
-        LinearRgba::new(0.05, 0.2, 0.95, 1.0).mix(&LinearRgba::new(0.95, 0.95, 0.2, 1.0), t.abs())
+        LinearRgba::new(0.05, 0.2, 0.95, 1.0).mix(&LinearRgba::new(0.95, 0.90, 0.2, 1.0), t.abs())
     };
     let color2 = if t >= 0. {
         LinearRgba::new(0.0, 0.17, 0.97, 1.0).mix(&LinearRgba::new(0.0, 0.97, 0.17, 1.0), t)
     } else {
-        LinearRgba::new(0.0, 0.17, 0.97, 1.0).mix(&LinearRgba::new(0.97, 0.97, 0.17, 1.0), t.abs())
+        LinearRgba::new(0.0, 0.17, 0.97, 1.0).mix(&LinearRgba::new(0.97, 0.95, 0.17, 1.0), t.abs())
     };
     let color3 = if t >= 0. {
         LinearRgba::new(0.0, 0.1, 0.98, 1.0).mix(&LinearRgba::new(0.0, 0.98, 0.1, 1.0), t)
     } else {
-        LinearRgba::new(0.0, 0.1, 0.98, 1.0).mix(&LinearRgba::new(0.98, 0.98, 0.1, 1.0), t.abs())
+        LinearRgba::new(0.0, 0.1, 0.98, 1.0).mix(&LinearRgba::new(0.98, 0.97, 0.3, 1.0), t.abs())
     };
 
     let vertex_colors: Vec<[f32; 4]> = vec![
